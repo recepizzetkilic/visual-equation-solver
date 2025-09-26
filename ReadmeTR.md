@@ -13,3 +13,5 @@
 
 ## Yazar
 Geliştiren: **Recep İzzet Kılıç**
+Öğrenciliğimde kendimi geliştirmek için uğraştığım bir proje.
+
