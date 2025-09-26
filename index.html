@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Görselleştirilmiş Denklem Çözücü</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+          onload="renderMathInElement(document.body, {delimiters: [{left:'$$', right:'$$', display:true}, {left:'$', right:'$', display:false}]});"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/nerdamer.core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Algebra.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Calculus.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nerdamer@1.1.13/Solve.js"></script>
+  <style>.katex-html{display:none}</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-4xl mx-auto p-4 sm:p-8">
+    <header class="mb-6">
+      <h1 class="text-2xl sm:text-3xl font-bold">Görselleştirilmiş Denklem Çözücü</h1>
+      <p class="text-sm text-gray-600 mt-2">Örnekler: <code>x^2-5x+6=0</code>, <code>2x+3=7</code>, <code>2+2×5-(3^2)</code>. Grafik yok; sağda sadece sonuç ve adımlar var.</p>
+    </header>
+
+    <section class="bg-white rounded-2xl shadow p-4 sm:p-6 space-y-4">
+      <div class="flex flex-col gap-3">
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="expr" class="flex-1 border rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Denklem veya ifade yaz (örn: x^2-5x+6=0)" />
+          <button id="solveBtn" class="px-4 py-2 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700">Çöz</button>
+        </div>
+        <div class="flex flex-wrap gap-2 text-sm">
+          <button data-ins="(" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">(</button>
+          <button data-ins=")" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">)</button>
+          <button data-ins="^" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">^</button>
+          <button data-ins="×" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">×</button>
+          <button data-ins="÷" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">÷</button>
+          <button data-ins="π" class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">π</button>
+          <button data-ins="," class="px-3 py-1 rounded-lg bg-gray-200 hover:bg-gray-300">,</button>
+          <button id="clrBtn" class="ml-auto px-3 py-1 rounded-lg bg-rose-200 hover:bg-rose-300">Temizle</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="bg-gray-100 rounded-xl p-3">
+          <h2 class="font-semibold mb-2">Sonuç</h2>
+          <div id="result" class="text-sm"></div>
+        </div>
+        <div class="bg-gray-100 rounded-xl p-3">
+          <h2 class="font-semibold mb-2">Adımlar</h2>
+          <div id="steps" class="text-sm space-y-2"></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="text-xs text-gray-500 mt-6 space-y-1">
+      <div>Bu araç eğitim amaçlıdır. Sembolik çözümler <a class="underline" href="https://github.com/jiggzson/nerdamer" target="_blank" rel="noreferrer">nerdamer</a> ile üretilir.</div>
+      <div class="text-gray-700">Yapan: <strong>Recep İzzet Kılıç</strong> — <a class="underline" href="#" target="_blank" rel="noreferrer">GitHub projesi</a></div>
+    </footer>
+  </div>
+
+  <script>
+    // Yardımcılar
+    function isEquation(str){ return str.includes('='); }
+    function toZeroForm(eq){ const [l,r]=eq.split('='); return `(${l})-(${r})`; }
+    function renderTeX(el, tex){ try{ katex.render(tex, el, {throwOnError:false}); }catch(_){ el.textContent=tex; } }
+    function uniqueNumeric(arr){ const out=[]; for(const v of arr){ const n=Number(v); if(Number.isFinite(n)&&!out.some(x=>Math.abs(x-n)<1e-9)) out.push(n);} return out.sort((a,b)=>a-b); }
+
+    // ---- Aritmetik ifade çözümleyici (parantez + ^ + × ÷; lookbehind yok) ----
+    function isNumericExpression(str){
+      const s=str.replace(/\s+/g,'').replace(/×/g,'*').replace(/÷/g,'/').replace(/π/g, Math.PI.toString());
+      return !s.includes('=') && /^[0-9.+\-*/^()]*$/.test(s) && /[0-9]/.test(s);
+    }
+    function fmtDispTokens(tokens){ return tokens.map(t=> t==='*'?'×': t==='/'?'÷': t).join(''); }
+    function tokenizeExpr(raw){
+      let s = raw.replace(/×/g,'*').replace(/÷/g,'/').replace(/π/g, Math.PI.toString());
+      s = s.replace(/,(?=\d)/g,'.');
+      const tokens=[]; const re=/(\d+(?:\.\d+)?)|[+\-*/^()]|\s+/g; let m;
+      while((m=re.exec(s))!==null){ if(!m[0].trim()) continue; tokens.push(m[1]??m[0]); }
+      const out=[];
+      for(let i=0;i<tokens.length;i++){
+        const t=tokens[i];
+        if(t==='-' && (i===0 || ['+','-','*','/','^','('].includes(out[out.length-1])) && /^(\d+(?:\.\d+)?)$/.test(tokens[i+1]||'')){
+          out.push(String(-Number(tokens[i+1]))); i++; continue;
+        }
+        out.push(t);
+      }
+      return out;
+    }
+    function applyOp(a,op,b){ a=Number(a); b=Number(b); switch(op){case'^':return Math.pow(a,b);case'*':return a*b;case'/':return a/b;case'+':return a+b;case'-':return a-b;} }
+    function reduceNoParens(tokens, steps){
+      while(tokens.includes('^')){ const idx=tokens.lastIndexOf('^'); const a=tokens[idx-1], b=tokens[idx+1]; const val=applyOp(a,'^',b); const before=fmtDispTokens(tokens); tokens.splice(idx-1,3,String(val)); const after=fmtDispTokens(tokens); steps.push(`${before} ⇒ ${after}`); }
+      let i=0; while(i<tokens.length){ if(tokens[i]==='*'||tokens[i]==='/'){ const before=fmtDispTokens(tokens); const val=applyOp(tokens[i-1],tokens[i],tokens[i+1]); tokens.splice(i-1,3,String(val)); const after=fmtDispTokens(tokens); steps.push(`${before} ⇒ ${after}`); i=0; continue;} i++; }
+      i=0; while(i<tokens.length){ if(tokens[i]==='+'||tokens[i]==='-'){ const before=fmtDispTokens(tokens); const val=applyOp(tokens[i-1],tokens[i],tokens[i+1]); tokens.splice(i-1,3,String(val)); const after=fmtDispTokens(tokens); steps.push(`${before} ⇒ ${after}`); i=0; continue;} i++; }
+      return tokens;
+    }
+    function simplifyNumericExpression(raw){
+      let tokens=tokenizeExpr(raw); const steps=[];
+      while(tokens.includes('(')){
+        let li=-1,ri=-1; for(let i=0;i<tokens.length;i++) if(tokens[i]==='(') li=i; for(let j=li+1;j<tokens.length;j++){ if(tokens[j]===')'){ ri=j; break; } }
+        if(li<0||ri<0) throw new Error('Parantez eşleşmesi hatalı');
+        const inner=tokens.slice(li+1,ri);
+        const before=fmtDispTokens(tokens);
+        const reduced=reduceNoParens(inner, steps);
+        const val=reduced.length===1? reduced[0] : (reduceNoParens(reduced, steps), reduced[0]);
+        tokens.splice(li,ri-li+1,String(val));
+        const after=fmtDispTokens(tokens); steps.push(`${before} ⇒ ${after}`);
+      }
+      const final=reduceNoParens(tokens, steps);
+      if(final.length!==1) throw new Error('İfade çözümlenemedi');
+      return {result:Number(final[0]), steps};
+    }
+    // ---- /Aritmetik ifade çözümleyici ----
+
+    function tryLinearOrQuadraticZeroForm(fstr){
+      try{ const sym=nerdamer.expand(fstr).toString(); let a=0,b=0,c=0; const f=(x)=>Number(nerdamer(sym,{x}).evaluate().text()); const h=1e-4; const f0=f(0); const f1=(f(h)-f(-h))/(2*h); const f2=(f(h)-2*f0+f(-h))/(h*h); c=f0; b=f1; a=f2/2; const deg3=Math.abs(Number(nerdamer.diff(sym,'x',3).evaluate().text())); if(!Number.isFinite(deg3)||Math.abs(deg3)<1e-6){ return {ok:true,a,b,c}; } return {ok:false}; }catch(_){ return {ok:false}; }
+    }
+    function solveEquation(eqRaw){
+      const stepsEl=document.getElementById('steps'); const resultEl=document.getElementById('result'); stepsEl.innerHTML=''; resultEl.innerHTML='';
+      let zeroForm=toZeroForm(eqRaw);
+      const s1=document.createElement('div'); s1.innerHTML='<strong>1) Standart form:</strong> $$'+eqRaw.replace(/\s+/g,'')+'$$ → $$'+zeroForm.replace(/\s+/g,'')+'=0$$'; stepsEl.appendChild(s1);
+      let roots=[]; let solvedBy='symbolic';
+      const k=tryLinearOrQuadraticZeroForm(zeroForm);
+      if(k.ok){ const {a,b,c}=k; if(Math.abs(a)<1e-9&&Math.abs(b)>1e-12){ const x=-c/b; const s2=document.createElement('div'); renderTeX(s2, `2) Doğrusal: bx+c=0 ⇒ x= -c/b = ${x.toFixed(6)}`); stepsEl.appendChild(s2); roots=[x]; solvedBy='linear'; } else if(Math.abs(a)>1e-12){ const disc=b*b-4*a*c; const s2=document.createElement('div'); renderTeX(s2, `2) İkinci derece: ax^2+bx+c=0, Δ=b^2-4ac = ${disc.toFixed(6)}`); stepsEl.appendChild(s2); if(disc>0){ const x1=(-b-Math.sqrt(disc))/(2*a); const x2=(-b+Math.sqrt(disc))/(2*a); const s3=document.createElement('div'); renderTeX(s3, `3) x_{1,2}=(-b±√Δ)/(2a) = ${x1.toFixed(6)}, ${x2.toFixed(6)}`); stepsEl.appendChild(s3); roots=[x1,x2]; solvedBy='quadratic'; } else if(Math.abs(disc)<1e-12){ const x=-b/(2*a); const s3=document.createElement('div'); renderTeX(s3, `3) x=-b/(2a) = ${x.toFixed(6)}`); stepsEl.appendChild(s3); roots=[x]; solvedBy='quadratic'; } else { const s3=document.createElement('div'); s3.textContent='3) Reel kök yok (Δ < 0)'; stepsEl.appendChild(s3); roots=[]; solvedBy='quadratic'; } } }
+      if(!roots.length && solvedBy==='symbolic'){
+        try{ const sol=nerdamer.solveEquations([eqRaw]); roots=sol.filter(p=>p[0]==='x').map(p=>Number(nerdamer(p[1]).evaluate().text())); const s2=document.createElement('div'); s2.innerHTML='<strong>2) Sembolik çözüm:</strong> '+sol.map(p=>`${p[0]} = ${nerdamer(p[1]).toTeX()}`).join(', '); stepsEl.appendChild(s2); }
+        catch(err){ const s2=document.createElement('div'); s2.textContent='2) Sembolik çözüm başarısız. Sayısal kök aranıyor.'; stepsEl.appendChild(s2); const f=(x)=>Number(nerdamer(zeroForm,{x}).evaluate().text()); const df=(x)=> (f(x+1e-6)-f(x-1e-6))/(2e-6); const guesses=[-5,-2,-1,0,1,2,5,8]; const found=[]; for(const g of guesses){ let x=g; for(let i=0;i<40;i++){ const d=df(x); if(!Number.isFinite(d)||Math.abs(d)<1e-10) break; x=x-f(x)/d; if(!Number.isFinite(x)) break; } if(Number.isFinite(x)) found.push(x);} roots=uniqueNumeric(found.filter(v=>Math.abs(f(v))<1e-5)); }
+      }
+      if(roots.length){ const tex=roots.map((r,i)=>`x_${i+1} = ${Number(r).toFixed(6)}`).join(', '); renderTeX(resultEl, tex);} else { resultEl.textContent='Kök bulunamadı veya reel kök yok.'; }
+    }
+
+    // Click handler
+    document.getElementById('solveBtn').addEventListener('click', ()=>{
+      const raw=document.getElementById('expr').value.trim(); if(!raw) return; const stepsEl=document.getElementById('steps'); const resultEl=document.getElementById('result'); stepsEl.innerHTML=''; resultEl.innerHTML='';
+      try{ if(isNumericExpression(raw)){ const {result,steps}=simplifyNumericExpression(raw); for(const s of steps){ const div=document.createElement('div'); div.textContent=s; stepsEl.appendChild(div);} resultEl.textContent=`Sonuç: ${result}`; } else if(isEquation(raw)){ solveEquation(raw); } else { resultEl.textContent='Sadece aritmetik ifade veya denklem gir.'; } }
+      catch(err){ resultEl.textContent='Hata: '+err.message; }
+    });
+    document.getElementById('expr').addEventListener('keydown', (e)=>{ if(e.key==='Enter') document.getElementById('solveBtn').click(); });
+
+    // Mini tuş takımı
+    function insertAtCursor(text){ const inp=document.getElementById('expr'); const start=inp.selectionStart??inp.value.length; const end=inp.selectionEnd??inp.value.length; const v=inp.value; inp.value=v.slice(0,start)+text+v.slice(end); const pos=start+text.length; inp.focus(); inp.setSelectionRange(pos,pos); }
+    document.querySelectorAll('[data-ins]').forEach(btn=>{ btn.addEventListener('click', ()=> insertAtCursor(btn.getAttribute('data-ins'))); });
+    document.getElementById('clrBtn').addEventListener('click', ()=>{ document.getElementById('expr').value=''; document.getElementById('steps').innerHTML=''; document.getElementById('result').textContent=''; });
+  </script>
+  <script>
+    // isNumericExpression fonksiyonunu override ederek ×, ÷ ve virgüllü sayıları sorunsuz algıla
+    function isNumericExpression(str){
+      let s = String(str);
+      s = s.replaceAll(' ', '')
+           .replaceAll('\t','')
+           .replaceAll('×','*')
+           .replaceAll('÷','/')
+           .replaceAll('π', String(Math.PI))
+           .replaceAll(',', '.');
+      if (s.includes('=')) return false;
+      const valid = '0123456789.+-*/^()';
+      let hasDigit = false;
+      for (const ch of s){
+        if (valid.indexOf(ch) === -1) return false;
+        if (ch >= '0' && ch <= '9') hasDigit = true;
+      }
+      return hasDigit;
+    }
+  </script>
+</body>
+</html>
