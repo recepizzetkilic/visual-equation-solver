@@ -14,5 +14,6 @@ Open `index.html` in your browser.
 
 ## Author
 Built by **Recep İzzet Kılıç**
-A project I worked on during my student years to improve myself.
+- A project I worked on during my student years to improve myself.
+
 
